@@ -1,0 +1,224 @@
+
+```{r}
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+options(digits=3)
+options(scipen=999)
+'%notin%' <- Negate('%in%')
+
+#does a standard group_by and count() with percentage
+grouper <- function(input_df, group_by_column, new_column_name = "n()"){
+  output_df <- input_df %>%
+    group_by(.data[[group_by_column]]) %>%
+    summarise(temp_count = n()) %>%
+    mutate(percent = temp_count/sum(temp_count)*100) %>%
+    arrange(desc(percent)) %>%
+    rename(!!new_column_name := temp_count)
+  return(output_df)
+}
+
+#group/counts every column in input dataframe
+group_count <- function(input_df, group_column_name='n()', state_filter=NA, start_col = 1){
+  column_names <- colnames(input_df)
+  if(!is.na(state_filter)){
+    input_df <- input_df %>%
+      filter(state == state_filter)
+  }
+  for (column in column_names[start_col:length(column_names)]){
+    output <- grouper(input_df, column, group_column_name)
+    print(output)
+  }
+}
+
+grouper_sum <- function(input_df, group_by_column, sum_column, new_column_name = "n()"){
+  output_df <- input_df %>%
+    group_by(.data[[group_by_column]]) %>%
+    summarise(temp_count = sum(.data[[sum_column]])) %>%
+    mutate(percent = temp_count/sum(temp_count)*100) %>%
+    arrange(desc(percent)) %>%
+    rename(!!new_column_name := temp_count)
+  return(output_df)
+  
+}
+
+#lowers case of every character column in a dataframe
+lower_df <- function(input_df){
+  names <- colnames(input_df)
+  output_df <- input_df
+  names <- colnames(output_df)
+  for (name in names){
+    if (is.character(output_df[[name]])){
+      output_df[[name]] <- tolower(output_df[[name]])
+      #print('yes')
+    } else {
+      output_df[[name]] <- output_df[[name]]
+      #print('no')
+    }
+  }
+  return(output_df)
+}
+
+
+
+```
+
+```{r}
+
+import_cleaner <- function(input_df){
+  
+  output_df <- input_df%>%
+    lower_df() %>%
+    filter(total_hours != "total\nhours") %>%
+    separate(pdf_source, c("junk", "junk2", "junk3", "year", "pdf_name"), "/") %>%
+    select(-c(junk, junk2, junk3)) %>%
+    #filter(!is.na(year)) %>%
+    mutate(month_name = case_when(
+      str_detect(pdf_name, "january") ~ "january",
+      str_detect(pdf_name, "february") ~ "february",
+      str_detect(pdf_name, "march") ~ "march",
+      str_detect(pdf_name, "april") ~ "april",
+      str_detect(pdf_name, "may") ~ "may",
+      str_detect(pdf_name, "june") ~ "june",
+      str_detect(pdf_name, "july") ~ "july",
+      str_detect(pdf_name, "august") ~ "august",
+      str_detect(pdf_name, "september") ~ "september",
+      str_detect(pdf_name, "october") ~ "october",
+      str_detect(pdf_name, "november") ~ "november",
+      str_detect(pdf_name, "december") ~ "december",
+      TRUE ~ "error"
+    )) %>%
+      mutate(month = case_when(
+      str_detect(pdf_name, "january") ~ 1,
+      str_detect(pdf_name, "february") ~ 2,
+      str_detect(pdf_name, "march") ~ 3,
+      str_detect(pdf_name, "april") ~ 4,
+      str_detect(pdf_name, "may") ~ 5,
+      str_detect(pdf_name, "june") ~ 6,
+      str_detect(pdf_name, "july") ~ 7,
+      str_detect(pdf_name, "august") ~ 8,
+      str_detect(pdf_name, "september") ~ 9,
+      str_detect(pdf_name, "october") ~ 10,
+      str_detect(pdf_name, "november") ~ 11,
+      str_detect(pdf_name, "december") ~ 12,
+      TRUE ~ NA
+    ))
+
+  return(output_df)
+  
+}
+
+header <- c("entity_person", "total_hours", "billed_hours", "pro_bono_hours", "total_services_billed", "total_expenses_billed", "pdf_source")
+
+temp <- read_csv("data/2019-2023.csv") 
+
+colnames(temp) <- header
+
+temp2 <- read_csv("data/2017-2018.csv")
+
+colnames(temp2) <- header
+
+temp3 <- read_csv("data/handmade-2017-oct-nov.csv", col_types = cols(.default = col_character())) %>%
+  mutate(month = as.numeric(month))
+
+master <- import_cleaner(temp) %>%
+  bind_rows(import_cleaner(temp2)) %>%
+  bind_rows(temp3)
+  
+
+master <- master %>%
+    filter(
+         #junk from parsing
+         !is.na(year),
+         #removing totals
+         entity_person != "total",
+         #removing totals with other labels
+         !is.na(total_services_billed),
+         #more totals
+         total_services_billed != "total\nservices\nbilled"
+         ) %>%
+  lower_df() %>%
+  separate(entity_person, c("entity_person", "extra_person_designation"), "\\(") %>%
+  mutate(entity_person = gsub("\n", " ", entity_person))
+
+master$total_expenses_billed[is.na(master$total_expenses_billed)] <- 0
+master$billed_hours[is.na(master$billed_hours)] <- 0
+master$pro_bono_hours[is.na(master$pro_bono_hours)] <- 0
+
+master <- master %>%
+  mutate(
+    total_services_billed = as.numeric(gsub("\\$|,", "", total_services_billed)),
+    total_expenses_billed = as.numeric(gsub("\\$|,", "", total_expenses_billed)),
+    total_hours = as.numeric(total_hours),
+    billed_hours = as.numeric(billed_hours),
+    pro_bono_hours = as.numeric(pro_bono_hours),
+    entity_person = gsub("10|6", "", entity_person)
+  ) %>%
+  select(-pdf_name, everything(), pdf_name)
+```
+
+# FACTCHECK
+
+## "Through January of this year, Venable had billed nearly $8 million, with $1.3 million of that total billed to Venable by Ken Thompson."
+
+```{r}
+
+sum(master$total_services_billed, na.rm = TRUE)
+
+```
+
+```{r}
+
+master %>%
+  group_by(entity_person) %>%
+  summarise(total_services_billed = sum(total_services_billed, na.rm = TRUE)) %>%
+  arrange(desc(total_services_billed))
+
+```
+
+# VIZ
+
+```{r}
+
+top_10_service_billers <- master %>%
+  group_by(entity_person) %>%
+  summarise(total_services_billed = sum(total_services_billed, na.rm = TRUE)) %>%
+  arrange(desc(total_services_billed)) %>%
+  slice(1:10)
+
+top_10_service_billers
+
+```
+
+
+```{r}
+
+library(scales)
+
+weight_dollars_billed <- 0.5
+weight_hours_worked <- 0.5
+
+viz_weighted_final_master <- master %>%
+  mutate(group_column = case_when(
+    entity_person %in% top_10_service_billers$entity_person ~ entity_person,
+    TRUE ~ "other"
+  )) %>%
+  group_by(group_column, year, month) %>%
+  summarise(total_hours = sum(total_hours, na.rm = TRUE),
+            billed_hours = sum(billed_hours, na.rm = TRUE),
+            total_services_billed = sum(total_services_billed, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(effective_rate = total_services_billed/total_hours,
+         share_dollars_billed = total_services_billed / sum(total_services_billed),
+         share_hours_worked = total_hours / sum(total_hours),
+         weighted_average = weight_dollars_billed * share_dollars_billed +
+                            weight_hours_worked * share_hours_worked,
+         pro_bono_hours = total_hours - billed_hours) %>%
+  arrange(desc(weighted_average)) %>%
+  mutate(group_column = str_to_title(group_column),
+         viz_dollars = paste0("$", comma(total_services_billed)))
+
+```
+
